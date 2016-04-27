@@ -93,9 +93,9 @@ options:
     version_added: "1.9"
   identifier:
     description:
-      - Weighted and latency-based resource record sets only. An identifier
+      - Have to be specified for Weighted, latency-based and failover resource record sets only. An identifier
         that differentiates among multiple resource record sets that have the
-        same combination of DNS name and type.
+        same combination of DNS name and type. 
     required: false
     default: null
     version_added: "2.0"
@@ -126,7 +126,7 @@ options:
   failover:
     description:
       - Failover resource record sets only. Whether this is the primary or
-        secondary resource record set.
+        secondary resource record set. Allowed values are PRIMARY and SECONDARY
     required: false
     default: null
     version_added: "2.0"
@@ -263,10 +263,12 @@ EXAMPLES = '''
 
 '''
 
+MINIMUM_BOTO_VERSION = '2.28.0'
 WAIT_RETRY_SLEEP = 5  # how many seconds to wait between propagation status polls
 
 
 import time
+import distutils.version
 
 try:
     import boto
@@ -335,6 +337,21 @@ def commit(changes, retry_interval, wait, wait_timeout):
         raise TimeoutError()
     return result
 
+# Shamelessly copied over from https://git.io/vgmDG
+IGNORE_CODE = 'Throttling'
+MAX_RETRIES=5
+def invoke_with_throttling_retries(function_ref, *argv):
+    retries=0
+    while True:
+        try:
+            retval=function_ref(*argv)
+            return retval
+        except boto.exception.BotoServerError, e:
+            if e.code != IGNORE_CODE or retries==MAX_RETRIES:
+                raise e
+        time.sleep(5 * (2**retries))
+        retries += 1
+
 def main():
     argument_spec = ec2_argument_spec()
     argument_spec.update(dict(
@@ -355,7 +372,7 @@ def main():
             weight                       = dict(required=False, type='int'),
             region                       = dict(required=False),
             health_check                 = dict(required=False),
-            failover                     = dict(required=False),
+            failover                     = dict(required=False,choices=['PRIMARY','SECONDARY']),
             vpc_id                       = dict(required=False),
             wait                         = dict(required=False, type='bool', default=False),
             wait_timeout                 = dict(required=False, type='int', default=300),
@@ -365,6 +382,9 @@ def main():
 
     if not HAS_BOTO:
         module.fail_json(msg='boto required for this module')
+
+    if distutils.version.StrictVersion(boto.__version__) < distutils.version.StrictVersion(MINIMUM_BOTO_VERSION):
+        module.fail_json(msg='Found boto in version %s, but >= %s is required' % (boto.__version__, MINIMUM_BOTO_VERSION))
 
     command_in                      = module.params.get('command')
     zone_in                         = module.params.get('zone').lower()
@@ -411,6 +431,16 @@ def main():
               module.fail_json(msg = "parameter 'value' must contain a single dns name for alias create/delete")
           elif not alias_hosted_zone_id_in:
               module.fail_json(msg = "parameter 'alias_hosted_zone_id' required for alias create/delete")
+	elif ( weight_in!=None or region_in!=None or failover_in!=None ) and identifier_in==None:
+	  module.fail_json(msg= "If you specify failover, region or weight you must also specify identifier")
+
+    if command_in == 'create':
+        if ( weight_in!=None or region_in!=None or failover_in!=None ) and identifier_in==None:
+          module.fail_json(msg= "If you specify failover, region or weight you must also specify identifier")
+        elif  ( weight_in==None and region_in==None and failover_in==None ) and identifier_in!=None:
+          module.fail_json(msg= "You have specified identifier which makes sense only if you specify one of: weight, region or failover.")
+        
+
 
     if vpc_id_in and not private_zone_in:
         module.fail_json(msg="parameter 'private_zone' must be true when specifying parameter"
@@ -452,7 +482,10 @@ def main():
         #Need to save this changes in rset, because of comparing rset.to_xml() == wanted_rset.to_xml() in next block
         rset.name = decoded_name
 
-        if rset.type == type_in and decoded_name.lower() == record_in.lower() and str(rset.identifier) == str(identifier_in):
+        if identifier_in is not None:
+            identifier_in = str(identifier_in)
+	
+        if rset.type == type_in and decoded_name.lower() == record_in.lower() and rset.identifier == identifier_in:
             found_record = True
             record['zone'] = zone_in
             record['type'] = rset.type
@@ -507,11 +540,14 @@ def main():
         changes.add_change_record(command, wanted_rset)
 
     try:
-        result = commit(changes, retry_interval_in, wait_in, wait_timeout_in)
+        result = invoke_with_throttling_retries(commit, changes, retry_interval_in, wait_in, wait_timeout_in)
     except boto.route53.exception.DNSServerError, e:
         txt = e.body.split("<Message>")[1]
         txt = txt.split("</Message>")[0]
-        module.fail_json(msg = txt)
+        if "but it already exists" in txt:
+                module.exit_json(changed=False)
+        else:   
+                module.fail_json(msg = txt)
     except TimeoutError:
         module.fail_json(msg='Timeout waiting for changes to replicate')
 

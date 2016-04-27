@@ -98,7 +98,10 @@ def write_fstab(lines, dest):
 
 def _escape_fstab(v):
     """ escape space (040), ampersand (046) and backslash (134) which are invalid in fstab fields """
-    return v.replace('\\', '\\134').replace(' ', '\\040').replace('&', '\\046')
+    if isinstance(v, int):
+        return v
+    else:
+        return v.replace('\\', '\\134').replace(' ', '\\040').replace('&', '\\046')
 
 def set_mount(module, **kwargs):
     """ set/change a mount point location in fstab """
@@ -111,11 +114,6 @@ def set_mount(module, **kwargs):
         fstab  = '/etc/fstab'
     )
     args.update(kwargs)
-
-    # save the mount name before space replacement
-    origname =  args['name']
-    # replace any space in mount name with '\040' to make it fstab compatible (man fstab)
-    args['name'] = args['name'].replace(' ', r'\040')
 
     new_line = '%(src)s %(name)s %(fstype)s %(opts)s %(dump)s %(passno)s\n'
 
@@ -156,14 +154,13 @@ def set_mount(module, **kwargs):
             to_write.append(line)
 
     if not exists:
-        to_write.append(new_line % args)
+        to_write.append(new_line % escaped_args)
         changed = True
 
     if changed and not module.check_mode:
         write_fstab(to_write, args['fstab'])
 
-    # mount function needs origname
-    return (origname, changed)
+    return (args['name'], changed)
 
 
 def unset_mount(module, **kwargs):
@@ -177,11 +174,6 @@ def unset_mount(module, **kwargs):
         fstab  = '/etc/fstab'
     )
     args.update(kwargs)
-
-    # save the mount name before space replacement
-    origname =  args['name']
-    # replace any space in mount name with '\040' to make it fstab compatible (man fstab)
-    args['name'] = args['name'].replace(' ', r'\040')
 
     to_write = []
     changed = False
@@ -212,8 +204,7 @@ def unset_mount(module, **kwargs):
     if changed and not module.check_mode:
         write_fstab(to_write, args['fstab'])
 
-    # umount needs origname
-    return (origname, changed)
+    return (args['name'], changed)
 
 
 def mount(module, **kwargs):
@@ -231,10 +222,10 @@ def mount(module, **kwargs):
     mount_bin = module.get_bin_path('mount')
 
     name = kwargs['name']
-    
+
     cmd = [ mount_bin, ]
-    
-    if os.path.ismount(name):
+
+    if ismount(name):
         cmd += [ '-o', 'remount', ]
 
     if get_platform().lower() == 'freebsd':
@@ -268,7 +259,7 @@ def main():
             state  = dict(required=True, choices=['present', 'absent', 'mounted', 'unmounted']),
             name   = dict(required=True),
             opts   = dict(default=None),
-            passno = dict(default=None),
+            passno = dict(default=None, type='str'),
             dump   = dict(default=None),
             src    = dict(required=True),
             fstype = dict(required=True),
@@ -311,7 +302,7 @@ def main():
     if state == 'absent':
         name, changed = unset_mount(module, **args)
         if changed and not module.check_mode:
-            if os.path.ismount(name):
+            if ismount(name):
                 res,msg  = umount(module, **args)
                 if res:
                     module.fail_json(msg="Error unmounting %s: %s" % (name, msg))
@@ -325,7 +316,7 @@ def main():
         module.exit_json(changed=changed, **args)
 
     if state == 'unmounted':
-        if os.path.ismount(name):
+        if ismount(name):
             if not module.check_mode:
                 res,msg  = umount(module, **args)
                 if res:
@@ -345,7 +336,7 @@ def main():
         name, changed = set_mount(module, **args)
         if state == 'mounted':
             res = 0
-            if os.path.ismount(name):
+            if ismount(name):
                 if changed and not module.check_mode:
                     res,msg = mount(module, **args)
             elif 'bind' in args.get('opts', []):
@@ -375,4 +366,6 @@ def main():
 
 # import module snippets
 from ansible.module_utils.basic import *
+from ansible.module_utils.ismount import *
+
 main()

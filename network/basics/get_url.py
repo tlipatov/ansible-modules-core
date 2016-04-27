@@ -178,6 +178,9 @@ EXAMPLES='''
 - name: download file with check
   get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf checksum=sha256:b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c
   get_url: url=http://example.com/path/file.conf dest=/etc/foo.conf checksum=md5:66dffb5228a211e61d6d7ef4a86f5758
+
+- name: download file from a file path
+  get_url: url="file:///tmp/afile.txt" dest=/tmp/afilecopy.txt  
 '''
 
 import urlparse
@@ -204,7 +207,7 @@ def url_get(module, url, dest, use_proxy, last_mod_time, force, timeout=10, head
         module.exit_json(url=url, dest=dest, changed=False, msg=info.get('msg', ''))
 
     # create a temporary file and copy content to do checksum-based replacement
-    if info['status'] != 200:
+    if info['status'] != 200 and not url.startswith('file:/'):
         module.fail_json(msg="Request failed", status_code=info['status'], response=info['msg'], url=url, dest=dest)
 
     if tmp_dest != '':
@@ -254,7 +257,6 @@ def extract_filename_from_headers(headers):
 # main
 
 def main():
-
     argument_spec = url_argument_spec()
     argument_spec.update(
         url = dict(required=True),
@@ -311,7 +313,6 @@ def main():
         except ValueError:
             module.fail_json(msg="The checksum parameter has to be in format <algorithm>:<checksum>")
 
-
     if not dest_is_dir and os.path.exists(dest):
         checksum_mismatch = False
 
@@ -327,7 +328,15 @@ def main():
 
         # Not forcing redownload, unless checksum does not match
         if not force and not checksum_mismatch:
-            module.exit_json(msg="file already exists", dest=dest, url=url, changed=False)
+            # allow file attribute changes
+            module.params['path'] = dest
+            file_args = module.load_file_common_arguments(module.params)
+            file_args['path'] = dest
+            changed = module.set_fs_attributes_if_different(file_args, False)
+
+            if changed:
+                module.exit_json(msg="file already exists but file attributes changed", dest=dest, url=url, changed=changed)
+            module.exit_json(msg="file already exists", dest=dest, url=url, changed=changed)
 
         # If the file already exists, prepare the last modified time for the
         # request.

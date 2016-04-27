@@ -54,9 +54,9 @@ options:
    network:
      description:
         - Unique name or ID of the external gateway network.
+        - required I(interfaces) or I(enable_snat) are provided.
      type: string
-     required: true when I(interfaces) or I(enable_snat) are provided,
-               false otherwise.
+     required: false
      default: None
    external_fixed_ips:
      description:

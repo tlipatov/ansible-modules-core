@@ -83,26 +83,12 @@ options:
     choices: ['always', 'on_create']
     description:
      - C(always) will update passwords if they differ.  C(on_create) will only set the password for newly created users.
-  aws_secret_key:
-    description:
-      - AWS secret key. If not set then the value of the AWS_SECRET_KEY environment variable is used.
-    required: false
-    default: null
-    aliases: [ 'ec2_secret_key', 'secret_key' ]
-  aws_access_key:
-    description:
-      - AWS access key. If not set then the value of the AWS_ACCESS_KEY environment variable is used.
-    required: false
-    default: null
-    aliases: [ 'ec2_access_key', 'access_key' ]
 notes:
   - 'Currently boto does not support the removal of Managed Policies, the module will error out if your user/group/role has managed policies when you try to do state=absent. They will need to be removed manually.'
 author:
     - "Jonathan I. Davila (@defionscode)"
     - "Paul Seiffert (@seiffert)"
-extends_documentation_fragment:
-    - aws
-    - ec2
+extends_documentation_fragment: aws
 '''
 
 EXAMPLES = '''
@@ -548,12 +534,12 @@ def main():
     new_path = module.params.get('new_path')
     key_count = module.params.get('key_count')
     key_state = module.params.get('access_key_state')
+    key_ids = module.params.get('access_key_ids')
     if key_state:
         key_state = key_state.lower()
         if any([n in key_state for n in ['active', 'inactive']]) and not key_ids:
             module.fail_json(changed=False, msg="At least one access key has to be defined in order"
                                                 " to use 'active' or 'inactive'")
-    key_ids = module.params.get('access_key_ids')
 
     if iam_type == 'user' and module.params.get('password') is not None:
         pwd = module.params.get('password')

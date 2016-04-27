@@ -28,6 +28,7 @@ version_added: "0.7"
 author: "Dane Summers (@dsummersl) <njharman@gmail.com>"
 notes:
    - Requires I(svn) to be installed on the client.
+   - This module does not handle externals
 requirements: []
 options:
   repo:
@@ -216,7 +217,10 @@ def main():
     export = module.params['export']
     switch = module.params['switch']
 
-    os.environ['LANG'] = 'C'
+    # We screenscrape a huge amount of svn commands so use C locale anytime we
+    # call run_command()
+    module.run_command_environ_update = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C', LC_CTYPE='C')
+
     svn = Subversion(module, dest, repo, revision, username, password, svn_path)
 
     if export or not os.path.exists(dest):
