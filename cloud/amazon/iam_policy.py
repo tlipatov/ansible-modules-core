@@ -310,6 +310,7 @@ def main():
           pdoc = json.dumps(pdoc)
         except Exception as e:
           module.fail_json(msg='Failed to convert the policy into valid JSON: %s' % str(e))
+      pdoc = pdoc.strip()
   else:
     pdoc=None
 
